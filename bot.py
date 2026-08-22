@@ -7,8 +7,9 @@ import yt_dlp
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.error import BadRequest
 
-# Берем токен из настроек Railway
+# Берем токен из настроек Railway. Если токена нет - бот не запустится.
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     print("❌ ОШИБКА: Не задана переменная окружения TOKEN на Railway!")
@@ -201,8 +202,15 @@ async def show_page(update, context, msg=None):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🎶 Нашёл!"
 
-    if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
-    else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    # ВОТ ТУТ ДОБАВЛЕНА ЗАЩИТА ОТ ОШИБКИ "Message is not modified":
+    try:
+        if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            pass # Просто игнорируем, если нажали на то же самое
+        else:
+            raise e
 
 async def handle_callback(update, context):
     query = update.callback_query
