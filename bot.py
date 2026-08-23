@@ -35,7 +35,6 @@ def fix_typos(query):
     return q
 
 def generate_yt_queries(query):
-    """Генерирует варианты запросов для YouTube Music"""
     q = fix_typos(query).strip()
     variants = [q]
     if translit(q) != q:
@@ -45,7 +44,6 @@ def generate_yt_queries(query):
     return list(dict.fromkeys(variants))
 
 def search_youtube_music(query, limit=20):
-    """Поиск именно через клиент YouTube Music"""
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     all_results = []
 
@@ -56,7 +54,6 @@ def search_youtube_music(query, limit=20):
                 'default_search': f'ytsearch{limit}:',
                 'headers': headers,
                 'socket_timeout': 10,
-                # ВАЖНО: Используем клиент web_music для поиска музыки!
                 'extractor_args': {'youtube': {'player_client': ['web_music']}}
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -82,7 +79,6 @@ def search_youtube_music(query, limit=20):
     return final[:limit]
 
 def download_youtube(url):
-    """Попытка скачать через официальный клиент"""
     clients_list = ['web_music', 'web', 'tv']
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     for client in clients_list:
@@ -95,7 +91,6 @@ def download_youtube(url):
                 'socket_timeout': 30,
                 'retries': 5,
                 'fragment_retries': 5,
-                # Обязательно куки для работы на Render!
                 'cookiefile': 'cookies.txt',
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
@@ -124,7 +119,10 @@ async def handle_message(update, context):
         except: pass
 
     msg = await update.message.reply_text(f"🧠 Ищу *{query}* на YouTube Music...", parse_mode='Markdown')
-    results = await search_youtube_music(query, 20)
+    
+    # ГЛАВНОЕ ИСПРАВЛЕНИЕ: убрали await и обернули в executor
+    loop = asyncio.get_event_loop()
+    results = await loop.run_in_executor(None, search_youtube_music, query, 20)
 
     context.user_data['last_search_msg_id'] = msg.message_id
 
