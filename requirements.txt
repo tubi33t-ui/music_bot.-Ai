@@ -1,3 +1,4 @@
 python-telegram-bot[webhooks]
 yt-dlp>=2025.05.22
 requests
+bgutil-ytdlp-pot-provider-rs
