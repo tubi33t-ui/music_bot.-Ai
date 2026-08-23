@@ -24,17 +24,17 @@ def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
-def search_soundcloud(query, limit=40):
-    # Ищем только на SoundCloud
+# --- БЫСТРЫЙ ПОИСК НА SOUNDCLOUD (ограничен до 20 треков) ---
+def search_soundcloud(query, limit=20):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-    search_query = f'scsearch:{limit}:{query}' # Специальный префикс для поиска на SoundCloud
+    search_query = f'scsearch:{limit}:{query}'
     try:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True,
             'headers': headers,
-            'socket_timeout': 10,
+            'socket_timeout': 5, # Не ждем долго, если сервер тупит
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(search_query, download=False)
@@ -44,8 +44,7 @@ def search_soundcloud(query, limit=40):
                 for entry in entries:
                     title = entry.get('title', 'Без названия')
                     duration = entry.get('duration', 0)
-                    # SoundCloud имеет много коротких треков, фильтруем от 1 до 15 минут
-                    if duration and (duration < 60 or duration > 900): continue
+                    # Убрали жесткий фильтр длительности для скорости
                     url = entry.get('url') or entry.get('webpage_url')
                     results.append({'title': title, 'url': url, 'duration': duration})
                 return results
@@ -57,7 +56,7 @@ def download_soundcloud(url):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     try:
         ydl_opts = {
-            'format': 'bestaudio/best', # Берем лучшее аудио, доступное на SoundCloud
+            'format': 'bestaudio/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
             'quiet': True,
             'no_warnings': True,
@@ -92,7 +91,11 @@ async def handle_message(update, context):
         try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_status_id)
         except: pass
 
-    limit = 40 if len(query.split()) != 2 else 10
+    # УСКОРЕННАЯ ЛОГИКА: 1 слово - 20 треков, 2 слова - 5 треков
+    if len(query.split()) == 2: 
+        limit = 5
+    else: 
+        limit = 20
 
     msg = await update.message.reply_text(f"🧠 Ищу на SoundCloud *{query}*...", parse_mode='Markdown')
     loop = asyncio.get_event_loop()
@@ -136,7 +139,7 @@ async def show_page(update, context, msg=None):
     keyboard.append([InlineKeyboardButton("⛔️ Отменить", callback_data="cancel")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = "🎶 Нашёл на SoundCloud!"
+    text = "🎶 Нашёл!"
     try:
         if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
         else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -159,7 +162,7 @@ async def handle_callback(update, context):
         if status_id:
             try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=status_id)
             except: pass
-        await query.edit_message_text("✅ Поиск остановлен.")
+        await query.edit_message_text("✅ Поиск остановлен. Напиши новый запрос.")
         return
     
     if data == "prev_page":
