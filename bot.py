@@ -3,7 +3,6 @@ import logging
 import glob
 import asyncio
 import re
-import json
 import yt_dlp
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -66,12 +65,10 @@ def search_youtube_music(query, limit=20):
     return final[:limit]
 
 def download_youtube(url):
-    # Перебираем надёжные клиенты и форматы
     clients_list = ['web', 'tv', 'ios']
     for client in clients_list:
         try:
             ydl_opts = {
-                # ОТКАЗЫВАЕМСЯ от 140! Ищем ЛЮБОЕ доступное аудио
                 'format': 'bestaudio/best',
                 'outtmpl': 'downloads/%(title)s.%(ext)s',
                 'quiet': True, 'no_warnings': True,
@@ -85,7 +82,6 @@ def download_youtube(url):
             os.makedirs('downloads', exist_ok=True)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            # Ищем все возможные расширения
             audio_files = glob.glob('downloads/*.mp3') + glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
             if audio_files:
                 return max(audio_files, key=os.path.getmtime)
@@ -96,9 +92,7 @@ def download_youtube(url):
 
 async def start(update, context):
     await update.message.reply_text(
-        "🎵 *Гипер-Бот*\n\n"
-        "Ищет на YouTube! Понимает транслит.\n"
-        "_Если не скачивает, вышлет ссылку._", parse_mode='Markdown')
+        "🎵 *Гипер-Бот*\n\nИщет на YouTube! Понимает транслит.\n_Если не скачивает, вышлет ссылку._", parse_mode='Markdown')
 
 async def handle_message(update, context):
     query = update.message.text.strip()
