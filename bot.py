@@ -100,13 +100,12 @@ def search_youtube(query, limit=40):
     return []
 
 def download_youtube(url):
-    # Перебираем всех надежных клиентов (web_embedded помогает с трудными видео)
-    clients_list = ['web_embedded', 'web', 'tv', 'ios']
+    # web_safari и mweb иногда обходят блокировку форматов!
+    clients_list = ['web_safari', 'mweb', 'android', 'web', 'tv']
     for client in clients_list:
         try:
             ydl_opts = {
-                # Пробуем формат 140 (m4a), но если его нет - качаем лучший аудио
-                'format': '140/bestaudio/best',
+                'format': 'bestaudio/best', # Идем от самого лучшего качества, не привязаны к формату 140
                 'outtmpl': 'downloads/%(title)s.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
