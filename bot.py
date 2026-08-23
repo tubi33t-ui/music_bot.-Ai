@@ -3,6 +3,8 @@ import logging
 import glob
 import asyncio
 import re
+import json
+import time
 import yt_dlp
 import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,72 +18,136 @@ if not TOKEN:
 
 logging.basicConfig(level=logging.INFO)
 
+# --- СЛОВАРЬ ОПЕЧАТОК И ТРАНСЛИТА ---
 def translit(text):
     mapping = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'}
     return ''.join(mapping.get(ch, ch) for ch in text.lower())
+
+def fix_query(query):
+    q = query.lower().strip()
+    fixes = {
+        'sleer': 'slayer', 'металлика': 'metallica', 'ария': 'aria', 
+        'мастер оф папетс': 'master of puppets', 'кипелов': 'kipelov',
+        'король и шут': 'korol i shut', 'энтер сендмен': 'enter sandman'
+    }
+    for typo, correct in fixes.items():
+        q = q.replace(typo, correct)
+    
+    # Если запрос на русском, добавляем транслит
+    variants = [q]
+    if translit(q) != q:
+        variants.append(translit(q))
+    return list(dict.fromkeys(variants))
 
 def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
-def fix_typos(query):
-    q = query.lower()
-    replacements = {
-        'sleer': 'slayer', 'металлика': 'metallica', 'мастер оф папетс': 'master of puppets',
-        'кипелов': 'kipelov', 'энтер сендмен': 'enter sandman', 'король и шут': 'korol i shut'
-    }
-    for typo, correct in replacements.items():
-        q = q.replace(typo, correct)
-    return q
+# --- УРОВЕНЬ 1: ПРЯМОЙ ПАРСИНГ HTML (Молниеносный) ---
+def direct_parse_search(query, limit=30):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Connection': 'keep-alive',
+        }
+        url = f'https://www.youtube.com/results?search_query={query}'
+        response = requests.get(url, headers=headers, timeout=5)
+        html = response.text
 
-def generate_yt_queries(query):
-    q = fix_typos(query).strip()
-    variants = [q]
-    if translit(q) != q:
-        variants.append(translit(q))
-    variants.append(f"{q} song")
-    variants.append(f"{q} audio")
-    return list(dict.fromkeys(variants))
+        match = re.search(r'var ytInitialData = (\{.*?\});', html)
+        if not match: return None
 
-def search_youtube_music(query, limit=20):
+        data = json.loads(match.group(1))
+        sections = data['contents']['twoColumnSearchResultsRenderer']['primaryContents']['sectionListRenderer']['contents']
+        results = []
+
+        for section in sections:
+            if 'itemSectionRenderer' not in section: continue
+            items = section['itemSectionRenderer']['contents']
+            for item in items:
+                if 'videoRenderer' not in item: continue
+                renderer = item['videoRenderer']
+                video_id = renderer.get('videoId')
+                title = ''.join(run['text'] for run in renderer.get('title', {}).get('runs', []))
+                length_text = renderer.get('lengthText', {}).get('simpleText', '0:00')
+                try:
+                    parts = length_text.split(':')
+                    duration = int(parts[0])*60 + int(parts[1]) if len(parts) == 2 else int(parts[0])
+                except:
+                    duration = 0
+
+                if duration < 30 or duration > 600: continue
+                results.append({'title': title, 'url': f'https://youtube.com/watch?v={video_id}', 'duration': duration})
+                if len(results) >= limit: return results
+        return results if results else None
+    except Exception as e:
+        print(f"Парсинг упал: {e}")
+        return None
+
+# --- УРОВЕНЬ 2: yt-dlp (Клиенты web и web_music) ---
+def yt_dlp_search(query, limit=30):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-    all_results = []
-
-    for v in generate_yt_queries(query):
+    
+    # Пробуем разные клиенты
+    for client in ['web', 'web_music']:
         try:
             ydl_opts = {
                 'quiet': True, 'no_warnings': True, 'extract_flat': True,
                 'default_search': f'ytsearch{limit}:',
                 'headers': headers,
                 'socket_timeout': 10,
-                'extractor_args': {'youtube': {'player_client': ['web_music']}}
+                'extractor_args': {'youtube': {'player_client': [client]}}
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(v, download=False)
+                info = ydl.extract_info(query, download=False)
                 entries = info.get('entries', [])
-                for entry in entries:
-                    title = entry.get('title', 'Без названия')
-                    duration = int(entry.get('duration') or 0)
-                    url = f"https://youtube.com/watch?v={entry.get('id')}"
-                    if url and (60 < duration < 900):
-                        all_results.append({
-                            'title': title, 'url': url, 'duration': duration, 'source': 'youtube'
-                        })
+                if entries:
+                    results = []
+                    for entry in entries:
+                        title = entry.get('title', 'Без названия')
+                        duration = int(entry.get('duration') or 0)
+                        url = entry.get('url') or f"https://youtube.com/watch?v={entry.get('id')}"
+                        if duration < 30 or duration > 600: continue
+                        results.append({'title': title, 'url': url, 'duration': duration})
+                    if results: return results
         except Exception as e:
-            logging.error(f"Ошибка поиска YT Music '{v}': {e}")
+            print(f"yt-dlp ({client}) упал: {e}")
             continue
+    return []
 
+# --- МЕГА-ПОИСК (Запускаем всё вместе) ---
+def mega_search(query, limit=30):
+    # Генерируем варианты (русский + английский)
+    all_results = []
+    for v in fix_query(query):
+        # Уровень 1: Прямой парсинг
+        direct = direct_parse_search(v, limit)
+        if direct:
+            all_results.extend(direct)
+        
+        # Уровень 2: yt-dlp
+        dlp = yt_dlp_search(v, limit)
+        if dlp:
+            all_results.extend(dlp)
+            
+        time.sleep(0.3) # Небольшая задержка, чтобы не забанили
+
+    # Убираем дубликаты
     final, seen = [], set()
     for r in all_results:
         if r['url'] not in seen:
             seen.add(r['url'])
             final.append(r)
+    
+    # Если ничего не нашли, возвращаем пустой список
     return final[:limit]
 
+# --- СКАЧИВАНИЕ (Пробуем разные клиенты) ---
 def download_youtube(url):
-    clients_list = ['web_music', 'web', 'tv']
+    clients = ['web', 'tv', 'web_music']
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-    for client in clients_list:
+    for client in clients:
         try:
             ydl_opts = {
                 'format': '140/bestaudio/best',
@@ -105,29 +171,35 @@ def download_youtube(url):
             continue
     return None
 
+# --- ОБРАБОТЧИКИ TELEGRAM ---
 async def start(update, context):
     await update.message.reply_text(
-        "🎵 *Гипер-Бот с ИИ*\n\n"
-        "Ищет на YouTube Music! Понимает транслит: *металлика* -> *metallica*\n\n"
-        "_Если не скачивает из-за блока Render, выдаст ссылку._", parse_mode='Markdown')
+        "🎵 *МЕГА-БОТ* \n\n"
+        "Включаю тройной поиск (HTML + Web + Music).\n"
+        "Понимает русский и английский!\n"
+        "_Пример: металлика, ария, enter sandman_\n\n"
+        "Если не скачивает - даст ссылку на YouTube!",
+        parse_mode='Markdown'
+    )
 
 async def handle_message(update, context):
     query = update.message.text.strip()
+    
     old_msg = context.user_data.pop('last_search_msg_id', None)
     if old_msg:
         try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_msg)
         except: pass
 
-    msg = await update.message.reply_text(f"🧠 Ищу *{query}* на YouTube Music...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🧠 Запускаю МЕГА-поиск на *{query}*...", parse_mode='Markdown')
     
-    # ГЛАВНОЕ ИСПРАВЛЕНИЕ: убрали await и обернули в executor
+    # ГЛАВНОЕ: Запускаем мега-поиск в отдельном потоке (без await, без ошибок)
     loop = asyncio.get_event_loop()
-    results = await loop.run_in_executor(None, search_youtube_music, query, 20)
-
+    results = await loop.run_in_executor(None, mega_search, query, 30)
+    
     context.user_data['last_search_msg_id'] = msg.message_id
 
     if not results:
-        await msg.edit_text(f"❌ Ничего не нашел. Попробуй написать на английском.", parse_mode='Markdown')
+        await msg.edit_text("❌ YouTube жестко блокирует IP Render для этого запроса. Попробуй еще раз через минуту или напиши на английском!", parse_mode='Markdown')
         return
 
     context.user_data['search_results'] = results
@@ -140,7 +212,6 @@ async def show_page(update, context, msg=None):
     per_page = 10
     total_pages = (len(results) + per_page - 1) // per_page
     if page >= total_pages: page = total_pages - 1
-
     start = page * per_page
     end = min(start + per_page, len(results))
     page_results = results[start:end]
@@ -193,7 +264,7 @@ async def handle_callback(update, context):
         if not results or index >= len(results):
             await query.edit_message_text("❌ Результаты устарели.")
             return
-
+        
         track = results[index]
         title = track['title']
         url = track['url']
@@ -208,7 +279,7 @@ async def handle_callback(update, context):
                     os.remove(filepath)
                     await status_msg.delete()
                 else:
-                    await status_msg.edit_text(f"❌ Не скачалось.\n[Открыть на YouTube]({url})", parse_mode='Markdown', disable_web_page_preview=True)
+                    await status_msg.edit_text(f"❌ Render блокирует скачивание.\n[Открыть оригинал на YouTube]({url})", parse_mode='Markdown', disable_web_page_preview=True)
             except asyncio.TimeoutError:
                 await status_msg.edit_text(f"⏱️ Слишком долго.\n[Открыть на YouTube]({url})", parse_mode='Markdown', disable_web_page_preview=True)
 
@@ -216,7 +287,7 @@ async def handle_callback(update, context):
         context.user_data['active_task'] = task
 
 def main():
-    print("✅ Гипер-Бот запущен!")
+    print("✅ МЕГА-БОТ запущен!")
     app = Application.builder().token(TOKEN).read_timeout(120).write_timeout(120).connect_timeout(120).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
