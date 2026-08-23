@@ -250,16 +250,14 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
     
-    # Берем URL из переменной, которую сам создает Render, иначе ставим свой
     webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://music-bot-ai.onrender.com") + "/webhook"
-
-    # Запускаем через Webhook (без Flask, он не нужен!)
+    
+    # Убрали secret_token - он вызывал ошибку
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
         url_path="webhook",
-        webhook_url=webhook_url,
-        secret_token=TOKEN
+        webhook_url=webhook_url
     )
 
 if __name__ == "__main__":
