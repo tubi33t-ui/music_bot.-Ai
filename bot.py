@@ -100,19 +100,20 @@ def search_youtube(query, limit=40):
     return []
 
 def download_youtube(url):
-    clients_list = ['android_vr', 'web_safari', 'web', 'tv']
+    # Только надежные клиенты, поддерживающие формат 140
+    clients_list = ['web', 'tv', 'ios']
     for client in clients_list:
         try:
             ydl_opts = {
-                'format': 'bestaudio/best',
+                'format': '140',  # Фиксированный качественный аудиоформат
                 'outtmpl': 'downloads/%(title)s.%(ext)s',
                 'quiet': True,
                 'no_warnings': True,
                 'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
                 'geo_bypass': True,
                 'socket_timeout': 30,
-                'retries': 3,
-                'fragment_retries': 3,
+                'retries': 5,
+                'fragment_retries': 5,
                 'cookiefile': 'cookies.txt',
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
@@ -265,7 +266,7 @@ def main():
         port=int(os.environ.get("PORT", 10000)),
         url_path="webhook",
         webhook_url=webhook_url,
-        secret_token="mysecret123" # ВОТ ТУТ ГЛАВНОЕ ИЗМЕНЕНИЕ - простая строка без спецсимволов!
+        secret_token="mysecret123"
     )
 
 if __name__ == "__main__":
