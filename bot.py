@@ -250,12 +250,15 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
     
-    # Запуск через WEBHOOK (Render дает порт через переменную PORT)
+    # Берем URL из переменной, которую сам создает Render, иначе ставим свой
+    webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://music-bot-ai.onrender.com") + "/webhook"
+
+    # Запускаем через Webhook (без Flask, он не нужен!)
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
         url_path="webhook",
-        webhook_url="https://music-bot-ai.onrender.com/webhook",
+        webhook_url=webhook_url,
         secret_token=TOKEN
     )
 
