@@ -9,13 +9,15 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest
 
+# Читаем токен из переменной окружения (настройки панели)
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    print("❌ ОШИБКА: Не задана переменная TOKEN на Render!")
+    print("❌ ОШИБКА: Не задана переменная TOKEN в настройках Kerit!")
     raise SystemExit
 
 logging.basicConfig(level=logging.INFO)
 
+# --- Умная транслитерация (как в прошлых кодах) ---
 def translit(text):
     mapping = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'}
     return ''.join(mapping.get(ch, ch) for ch in text.lower())
@@ -26,7 +28,7 @@ def clean_title(title):
 
 def fix_query(query):
     q = query.lower().strip()
-    fixes = {'sleer': 'slayer', 'металлика': 'metallica', 'ария': 'aria', 'мастер оф папетс': 'master of puppets', 'кипелов': 'kipelov', 'энтер сендмен': 'enter sandman'}
+    fixes = {'sleer': 'slayer', 'металлика': 'metallica', 'мастер оф папетс': 'master of puppets', 'кипелов': 'kipelov', 'энтер сендмен': 'enter sandman'}
     for typo, correct in fixes.items():
         q = q.replace(typo, correct)
     variants = [q]
@@ -34,7 +36,8 @@ def fix_query(query):
         variants.append(translit(q))
     return list(dict.fromkeys(variants))
 
-def search_youtube_music(query, limit=20):
+# --- Поиск ---
+def search_youtube(query, limit=20):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     all_results = []
     for v in fix_query(query):
@@ -64,6 +67,7 @@ def search_youtube_music(query, limit=20):
             final.append(r)
     return final[:limit]
 
+# --- Скачивание (убираем cookies.txt, чтобы не заливать файл на сервер) ---
 def download_youtube(url):
     clients_list = ['web', 'tv', 'ios']
     for client in clients_list:
@@ -76,7 +80,6 @@ def download_youtube(url):
                 'socket_timeout': 30,
                 'retries': 5,
                 'fragment_retries': 5,
-                'cookiefile': 'cookies.txt',
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
             os.makedirs('downloads', exist_ok=True)
@@ -90,9 +93,9 @@ def download_youtube(url):
             continue
     return None
 
+# --- Обработчики (меню не пропадает) ---
 async def start(update, context):
-    await update.message.reply_text(
-        "🎵 *Гипер-Бот*\n\nИщет на YouTube! Понимает транслит.\n_Если не скачивает, вышлет ссылку._", parse_mode='Markdown')
+    await update.message.reply_text("🎵 *Музыкальный бот (Kerit)*\nНапиши группу или песню.", parse_mode='Markdown')
 
 async def handle_message(update, context):
     query = update.message.text.strip()
@@ -103,13 +106,12 @@ async def handle_message(update, context):
 
     msg = await update.message.reply_text(f"🧠 Ищу *{query}*...", parse_mode='Markdown')
     loop = asyncio.get_event_loop()
-    results = await loop.run_in_executor(None, search_youtube_music, query, 20)
+    results = await loop.run_in_executor(None, search_youtube, query, 20)
     context.user_data['last_search_msg_id'] = msg.message_id
 
     if not results:
-        await msg.edit_text(f"❌ Ничего не найден. Попробуй на английском!", parse_mode='Markdown')
+        await msg.edit_text("❌ Ничего не найдено. Попробуй на английском!", parse_mode='Markdown')
         return
-
     context.user_data['search_results'] = results
     context.user_data['current_page'] = 0
     await show_page(update, context, msg)
@@ -123,7 +125,6 @@ async def show_page(update, context, msg=None):
     start = page * per_page
     end = min(start + per_page, len(results))
     page_results = results[start:end]
-
     keyboard = []
     for i, track in enumerate(page_results, start=start + 1):
         clean_t = clean_title(track['title'])
@@ -132,14 +133,12 @@ async def show_page(update, context, msg=None):
         label = f"▶️ {i}. {clean_t[:35]} - {dur_str}"
         if len(label) > 60: label = label[:57] + '...'
         keyboard.append([InlineKeyboardButton(label, callback_data=f"play_{i-1}")])
-
     nav_buttons = []
     if page > 0: nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="prev_page"))
     nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
     if page < total_pages - 1: nav_buttons.append(InlineKeyboardButton("Вперёд ➡️", callback_data="next_page"))
     if nav_buttons: keyboard.append(nav_buttons)
     keyboard.append([InlineKeyboardButton("⛔️ Отменить", callback_data="cancel")])
-
     try:
         if msg: await msg.edit_text("🎶 Нашёл!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
         else: await update.callback_query.message.edit_text("🎶 Нашёл!", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
@@ -176,7 +175,6 @@ async def handle_callback(update, context):
         title = track['title']
         url = track['url']
         status_msg = await query.message.reply_text(f"⏳ Качаю *{title}*...", parse_mode='Markdown')
-
         async def download_and_send():
             try:
                 filepath = await asyncio.wait_for(asyncio.to_thread(download_youtube, url), timeout=90)
@@ -189,21 +187,16 @@ async def handle_callback(update, context):
                     await status_msg.edit_text(f"❌ Не скачалось.\n[Открыть на YouTube]({url})", parse_mode='Markdown', disable_web_page_preview=True)
             except asyncio.TimeoutError:
                 await status_msg.edit_text(f"⏱️ Слишком долго.\n[Открыть на YouTube]({url})", parse_mode='Markdown', disable_web_page_preview=True)
-
         task = asyncio.create_task(download_and_send())
         context.user_data['active_task'] = task
 
 def main():
-    print("✅ Гипер-Бот запущен!")
+    print("✅ Бот запущен на Kerit Cloud!")
     app = Application.builder().token(TOKEN).read_timeout(120).write_timeout(120).connect_timeout(120).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://music-bot-ai.onrender.com") + "/webhook"
-    app.run_webhook(
-        listen="0.0.0.0", port=int(os.environ.get("PORT", 10000)),
-        url_path="webhook", webhook_url=webhook_url, secret_token="mysecret123"
-    )
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
