@@ -16,7 +16,6 @@ if not TOKEN:
 
 logging.basicConfig(level=logging.INFO)
 
-# Транслитерация для поиска на английском
 def translit(text):
     mapping = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'}
     return ''.join(mapping.get(ch, ch) for ch in text.lower())
@@ -25,11 +24,9 @@ def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
-# --- УЛУЧШЕННЫЙ ПОИСК НА SOUNDCLOUD ---
-def search_soundcloud(query, limit=30):
+def search_soundcloud(query, limit=50):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     
-    # Генерируем варианты запроса (русский + английский)
     variants = [query]
     if translit(query) != query:
         variants.append(translit(query))
@@ -49,10 +46,8 @@ def search_soundcloud(query, limit=30):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(search_query, download=False)
                 entries = info.get('entries', [])
-                
                 for entry in entries:
                     title = entry.get('title', 'Без названия')
-                    # SoundCloud отдает float, приводим к int, чтобы не падать
                     duration = int(entry.get('duration') or 0)
                     url = entry.get('url') or entry.get('webpage_url')
                     if url:
@@ -61,7 +56,7 @@ def search_soundcloud(query, limit=30):
             print(f"Ошибка поиска '{q}': {e}")
             continue
 
-    # Убираем дубликаты и возвращаем максимум limit
+    # Убираем дубликаты
     final_results = []
     seen = set()
     for r in all_results:
@@ -95,7 +90,7 @@ def download_soundcloud(url):
     return None
 
 async def start(update, context):
-    await update.message.reply_text("🎵 *SoundCloud Бот (Расширенный поиск)*\nПросто напиши название песни или исполнителя!\n*Совет:* Ищи больше по-английски, так как западные исполнители чаще всего есть именно там.", parse_mode='Markdown')
+    await update.message.reply_text("🎵 *SoundCloud Бот (ХИТ ПОИСК)*\n\nПросто напиши исполнителя или песню!\n\n_Подсказка: SoundCloud — это инди, ремиксы и каверы. Если ищешь Metallica или Slayer, там их нет, ищи 'Techno', 'Remix' или 'Rock'!_", parse_mode='Markdown')
 
 async def handle_message(update, context):
     query = update.message.text.strip()
@@ -109,20 +104,17 @@ async def handle_message(update, context):
         try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_status_id)
         except: pass
 
-    # Новый лимит: 2 слова - 10 результатов, всё остальное - 30
-    if len(query.split()) == 2: 
-        limit = 10
-    else: 
-        limit = 30
+    # Всегда ищем максимум (50), чтобы было из чего выбрать
+    limit = 50
 
-    msg = await update.message.reply_text(f"🧠 Ищу *{query}* на SoundCloud...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🔍 Ищу *{query}* на SoundCloud (до 50 треков)...", parse_mode='Markdown')
     loop = asyncio.get_event_loop()
     results = await loop.run_in_executor(None, search_soundcloud, query, limit)
     
     context.user_data['last_search_msg_id'] = msg.message_id
 
     if not results:
-        await msg.edit_text(f"❌ По запросу *{query}* ничего не нашлось.\nПопробуй написать на английском!", parse_mode='Markdown')
+        await msg.edit_text(f"❌ По запросу *{query}* ничего не нашлось.\nСкорее всего, этого артиста нет на SoundCloud. Попробуй написать на английском.", parse_mode='Markdown')
         return
 
     context.user_data['search_results'] = results
@@ -132,7 +124,7 @@ async def handle_message(update, context):
 async def show_page(update, context, msg=None):
     results = context.user_data.get('search_results', [])
     page = context.user_data.get('current_page', 0)
-    per_page = 15  # Больше треков на странице
+    per_page = 15
     total_pages = (len(results) + per_page - 1) // per_page
     if page >= total_pages: page = total_pages - 1; context.user_data['current_page'] = page
     start = page * per_page
