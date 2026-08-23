@@ -127,32 +127,38 @@ def search_youtube(query, limit=40):
     print("❌ ВСЕ СПОСОБЫ ПРОВАЛИЛИСЬ.")
     return []
 
-# 🔥 НОВАЯ ФУНКЦИЯ СКАЧИВАНИЯ (обход блокировок YouTube)
+# 🔥 НОВАЯ ЖИВУЧАЯ ФУНКЦИЯ СКАЧИВАНИЯ
 def download_youtube(url):
-    try:
-        ydl_opts = {
-            'format': 'bestaudio/best',  # Ищем любой аудиоформат
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'quiet': True, 'no_warnings': True,
-            'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
-            'geo_bypass': True,
-            'socket_timeout': 20,
-            'retries': 5,  # Больше попыток, если сеть плохая
-            'fragment_retries': 5,
-            'extractor_args': {'youtube': {'player_client': ['android', 'web']}}  # Обход блокировки дата-центров
-        }
-        os.makedirs('downloads', exist_ok=True)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    # Перебираем разные методы (клиенты), пока не сработает
+    clients_list = ['android', 'web', 'tv', 'ios', 'mweb']
+    
+    for client in clients_list:
+        try:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
+                'geo_bypass': True,
+                'socket_timeout': 30,
+                'retries': 5,
+                'fragment_retries': 5,
+                'extractor_args': {'youtube': {'player_client': [client]}}
+            }
+            os.makedirs('downloads', exist_ok=True)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
             
-        # Ищем все возможные аудиофайлы
-        audio_files = glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
-        if audio_files:
-            return max(audio_files, key=os.path.getmtime)
-        return None
-    except Exception as e:
-        logging.error(f"Ошибка скачивания: {e}")
-        return None
+            audio_files = glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
+            if audio_files:
+                return max(audio_files, key=os.path.getmtime)
+            
+        except Exception as e:
+            logging.error(f"Ошибка скачивания (клиент {client}): {e}")
+            continue
+            
+    return None
 
 async def start(update, context):
     await update.message.reply_text("🎵 *Музыкальный бот*\nНапиши группу или песню. Нажми *⛔️ Отменить*, чтобы остановить!", parse_mode='Markdown')
@@ -216,7 +222,6 @@ async def show_page(update, context, msg=None):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🎶 Нашёл!"
 
-    # Защита от ошибки "Message is not modified":
     try:
         if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
         else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
