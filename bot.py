@@ -113,7 +113,6 @@ def download_youtube(url):
                 'socket_timeout': 30,
                 'retries': 3,
                 'fragment_retries': 3,
-                # ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ - ПОДГРУЖАЕМ КУКИ ОТ YOUTUBE:
                 'cookiefile': 'cookies.txt',
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
@@ -266,7 +265,7 @@ def main():
         port=int(os.environ.get("PORT", 10000)),
         url_path="webhook",
         webhook_url=webhook_url,
-        secret_token=TOKEN
+        secret_token="mysecret123" # ВОТ ТУТ ГЛАВНОЕ ИЗМЕНЕНИЕ - простая строка без спецсимволов!
     )
 
 if __name__ == "__main__":
