@@ -9,7 +9,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest
 
-# Берем токен из настроек Railway
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     print("❌ ОШИБКА: Не задана переменная окружения TOKEN на Railway!")
@@ -25,7 +24,6 @@ def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
-# СПОСОБ 1: Прямой парсинг YouTube (имитация браузера)
 def direct_parse_search(query, limit=40):
     try:
         headers = {
@@ -69,7 +67,6 @@ def direct_parse_search(query, limit=40):
         print(f"❌ Способ 1 (Прямой парсинг) не сработал: {e}")
         return None
 
-# СПОСОБ 2: yt-dlp (Быстрый)
 def search_youtube(query, limit=40):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     cleaned = query.strip()
@@ -101,7 +98,6 @@ def search_youtube(query, limit=40):
     except Exception as e:
         print(f"❌ Способ 2 (yt-dlp быстрый) не сработал: {e}")
 
-    # СПОСОБ 3: yt-dlp (Медленный, но самый надежный)
     print("🐢 Пробуем yt-dlp (медленный режим)...")
     try:
         ydl_opts = {
@@ -127,11 +123,9 @@ def search_youtube(query, limit=40):
     print("❌ ВСЕ СПОСОБЫ ПРОВАЛИЛИСЬ.")
     return []
 
-# 🔥 НОВАЯ ЖИВУЧАЯ ФУНКЦИЯ СКАЧИВАНИЯ
 def download_youtube(url):
-    # Перебираем разные методы (клиенты), пока не сработает
-    clients_list = ['android', 'web', 'tv', 'ios', 'mweb']
-    
+    # Наилучшие клиенты для обхода блокировок: android_vr и web_safari [citation:15]
+    clients_list = ['android_vr', 'web_safari', 'web', 'tv']
     for client in clients_list:
         try:
             ydl_opts = {
@@ -142,8 +136,8 @@ def download_youtube(url):
                 'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
                 'geo_bypass': True,
                 'socket_timeout': 30,
-                'retries': 5,
-                'fragment_retries': 5,
+                'retries': 3,
+                'fragment_retries': 3,
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
             os.makedirs('downloads', exist_ok=True)
@@ -157,7 +151,6 @@ def download_youtube(url):
         except Exception as e:
             logging.error(f"Ошибка скачивания (клиент {client}): {e}")
             continue
-            
     return None
 
 async def start(update, context):
