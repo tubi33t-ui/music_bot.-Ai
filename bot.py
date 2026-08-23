@@ -3,27 +3,44 @@ import logging
 import glob
 import asyncio
 import re
+import threading
 import yt_dlp
 import requests
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest
 
+# Берем токен из настроек Render
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    print("❌ ОШИБКА: Не задана переменная окружения TOKEN на Railway!")
+    print("❌ ОШИБКА: Не задана переменная TOKEN на Render!")
     raise SystemExit
 
 logging.basicConfig(level=logging.INFO)
 
+# --- FLASK ДЛЯ RENDER ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running", 200
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+# --- ТРАНСЛИТ ---
 def translit(text):
     mapping = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'}
     return ''.join(mapping.get(ch, ch) for ch in text.lower())
 
+# --- ОЧИСТКА НАЗВАНИЙ ---
 def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
+# --- БЫСТРЫЙ ПОИСК (Прямой парсинг) ---
 def direct_parse_search(query, limit=40):
     try:
         headers = {
@@ -67,6 +84,7 @@ def direct_parse_search(query, limit=40):
         print(f"❌ Способ 1 (Прямой парсинг) не сработал: {e}")
         return None
 
+# --- ОСНОВНОЙ ПОИСК ---
 def search_youtube(query, limit=40):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     cleaned = query.strip()
@@ -123,8 +141,8 @@ def search_youtube(query, limit=40):
     print("❌ ВСЕ СПОСОБЫ ПРОВАЛИЛИСЬ.")
     return []
 
+# --- СКАЧИВАНИЕ (Обход блокировок) ---
 def download_youtube(url):
-    # Наилучшие клиенты для обхода блокировок: android_vr и web_safari [citation:15]
     clients_list = ['android_vr', 'web_safari', 'web', 'tv']
     for client in clients_list:
         try:
@@ -153,6 +171,7 @@ def download_youtube(url):
             continue
     return None
 
+# --- ОБРАБОТЧИКИ ТЕЛЕГРАМ ---
 async def start(update, context):
     await update.message.reply_text("🎵 *Музыкальный бот*\nНапиши группу или песню. Нажми *⛔️ Отменить*, чтобы остановить!", parse_mode='Markdown')
 
@@ -294,13 +313,24 @@ async def handle_callback(update, context):
         context.user_data['active_task'] = task
         await status_msg.edit_text(f"⏳ Качаю *{title}*...", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⛔️ Отменить", callback_data="cancel")]]))
 
-def main():
-    print("✅ Бот запущен на Railway!")
-    app = Application.builder().token(TOKEN).read_timeout(120).write_timeout(120).connect_timeout(120).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+# --- ЗАПУСК FLASK В ОТДЕЛЬНОМ ПОТОКЕ ---
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+
+# --- ЗАПУСК БОТА ---
+async def run_bot():
+    bot_app = Application.builder().token(TOKEN).read_timeout(120).write_timeout(120).connect_timeout(120).build()
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    bot_app.add_handler(CallbackQueryHandler(handle_callback))
+    print("✅ Бот запущен на Render!")
+    await bot_app.initialize()
+    await bot_app.start()
+    await bot_app.updater.start_polling()
 
 if __name__ == "__main__":
-    main()
+    # Запускаем Flask, чтобы Render не ругался на отсутствие порта
+    thread = threading.Thread(target=run_flask)
+    thread.start()
+    # Запускаем бота
+    asyncio.run(run_bot())
