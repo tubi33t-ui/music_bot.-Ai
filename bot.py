@@ -20,28 +20,51 @@ def translit(text):
     mapping = {'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya'}
     return ''.join(mapping.get(ch, ch) for ch in text.lower())
 
-def clean_title(title):
-    title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
-    return title.strip(' -–—,|')
+def smart_variants(query):
+    # ИИ-логика: генерируем умные варианты запроса
+    q = query.lower().strip()
+    variants = [q]
+    
+    # 1. Перевод в транслит
+    if translit(q) != q:
+        variants.append(translit(q))
+    
+    # 2. Специальные фонетические исправления (мастер оф папетс -> master of puppets)
+    corrections = {
+        'мастер оф папетс': 'master of puppets',
+        'мастер оф': 'master of',
+        'папетс': 'puppets',
+        'энтер сэндмен': 'enter sandman',
+        'ненависть': 'nothing else matters',
+        'кипелов': 'kipelov',
+    }
+    for rus, eng in corrections.items():
+        if rus in q:
+            variants.append(q.replace(rus, eng))
+            variants.append(eng)
+    
+    # 3. Добавляем "модификаторы", чтобы найти хоть что-то на SoundCloud
+    if len(q.split()) >= 2:
+        variants.append(f"{q} cover")
+        variants.append(f"{q} remix")
+        variants.append(f"{q} instrumental")
+        variants.append(f"{q} tribute")
+        variants.append(f"{q} live")
+    
+    return list(dict.fromkeys(variants))
 
-def search_soundcloud(query, limit=50):
+def search_soundcloud(query, limit=20):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     
-    variants = [query]
-    if translit(query) != query:
-        variants.append(translit(query))
-    variants = list(dict.fromkeys(variants))
-
     all_results = []
-    for q in variants:
+    variants = smart_variants(query)
+    
+    for v in variants:
         try:
-            search_query = f'scsearch:{limit}:{q}'
+            search_query = f'scsearch:{limit}:{v}'
             ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': True,
-                'headers': headers,
-                'socket_timeout': 10,
+                'quiet': True, 'no_warnings': True, 'extract_flat': True,
+                'headers': headers, 'socket_timeout': 10,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(search_query, download=False)
@@ -51,46 +74,58 @@ def search_soundcloud(query, limit=50):
                     duration = int(entry.get('duration') or 0)
                     url = entry.get('url') or entry.get('webpage_url')
                     if url:
-                        all_results.append({'title': title, 'url': url, 'duration': duration})
-        except Exception as e:
-            print(f"Ошибка поиска '{q}': {e}")
+                        all_results.append({'title': title, 'url': url, 'duration': duration, 'type': 'soundcloud'})
+        except:
             continue
 
     # Убираем дубликаты
-    final_results = []
+    final = []
     seen = set()
     for r in all_results:
         if r['url'] not in seen:
             seen.add(r['url'])
-            final_results.append(r)
-    return final_results[:limit]
+            final.append(r)
+    return final[:limit]
+
+def search_youtube_links(query, limit=5):
+    # Если SoundCloud пуст, ищем ссылки на YouTube
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    try:
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True,
+                    'default_search': f'ytsearch{limit}:', 'headers': headers}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(query, download=False)
+            entries = info.get('entries', [])
+            results = []
+            for entry in entries:
+                title = entry.get('title', 'Без названия')
+                duration = int(entry.get('duration') or 0)
+                url = f"https://youtube.com/watch?v={entry.get('id')}"
+                results.append({'title': title, 'url': url, 'duration': duration, 'type': 'youtube'})
+            return results
+    except:
+        return []
 
 def download_soundcloud(url):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     try:
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'quiet': True,
-            'no_warnings': True,
-            'headers': headers,
-            'socket_timeout': 30,
-            'retries': 3,
-            'fragment_retries': 3,
+            'format': 'bestaudio/best', 'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'quiet': True, 'no_warnings': True, 'headers': headers,
+            'socket_timeout': 30, 'retries': 3, 'fragment_retries': 3,
         }
         os.makedirs('downloads', exist_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
         audio_files = glob.glob('downloads/*.mp3') + glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
         if audio_files:
             return max(audio_files, key=os.path.getmtime)
     except Exception as e:
-        logging.error(f"Ошибка скачивания с SoundCloud: {e}")
+        logging.error(f"Ошибка скачивания: {e}")
     return None
 
 async def start(update, context):
-    await update.message.reply_text("🎵 *SoundCloud Бот (ХИТ ПОИСК)*\n\nПросто напиши исполнителя или песню!\n\n_Подсказка: SoundCloud — это инди, ремиксы и каверы. Если ищешь Metallica или Slayer, там их нет, ищи 'Techno', 'Remix' или 'Rock'!_", parse_mode='Markdown')
+    await update.message.reply_text("🎵 *Умный музыкальный бот*\n\nПросто напиши название! Например: *металлика мастер оф папетс*\n\n_Бот сам поймет транслит, найдет ремиксы на SoundCloud или даст ссылку на YouTube._", parse_mode='Markdown')
 
 async def handle_message(update, context):
     query = update.message.text.strip()
@@ -104,27 +139,39 @@ async def handle_message(update, context):
         try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_status_id)
         except: pass
 
-    # Всегда ищем максимум (50), чтобы было из чего выбрать
-    limit = 50
-
-    msg = await update.message.reply_text(f"🔍 Ищу *{query}* на SoundCloud (до 50 треков)...", parse_mode='Markdown')
+    msg = await update.message.reply_text(f"🧠 Анализирую запрос *{query}*...", parse_mode='Markdown')
     loop = asyncio.get_event_loop()
-    results = await loop.run_in_executor(None, search_soundcloud, query, limit)
     
-    context.user_data['last_search_msg_id'] = msg.message_id
-
-    if not results:
-        await msg.edit_text(f"❌ По запросу *{query}* ничего не нашлось.\nСкорее всего, этого артиста нет на SoundCloud. Попробуй написать на английском.", parse_mode='Markdown')
+    # ИИ-поиск: сначала SoundCloud, потом YouTube ссылки
+    soundcloud_results = await loop.run_in_executor(None, search_soundcloud, query, 10)
+    
+    if soundcloud_results:
+        context.user_data['search_results'] = soundcloud_results
+        context.user_data['current_page'] = 0
+        context.user_data['last_search_msg_id'] = msg.message_id
+        await msg.edit_text("🎶 Нашёл на SoundCloud!", parse_mode='Markdown')
+        await show_page(update, context, msg)
         return
 
-    context.user_data['search_results'] = results
-    context.user_data['current_page'] = 0
-    await show_page(update, context, msg)
+    # Если на SoundCloud пусто, ищем на YouTube!
+    youtube_results = await loop.run_in_executor(None, search_youtube_links, query, 5)
+    
+    if youtube_results:
+        text = "⚠️ *Официальных треков нет на SoundCloud.*\n\nВот ссылки на YouTube (скачать не могу из-за блокировки Render, но открыть можно!):\n\n"
+        keyboard = []
+        for i, track in enumerate(youtube_results):
+            text += f"{i+1}. {track['title'][:40]}\n"
+            keyboard.append([InlineKeyboardButton(f"🔗 Открыть: {track['title'][:30]}", url=track['url'])])
+        
+        await msg.edit_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    await msg.edit_text(f"❌ Ничего не нашёл. Проверь, правильно ли написал.", parse_mode='Markdown')
 
 async def show_page(update, context, msg=None):
     results = context.user_data.get('search_results', [])
     page = context.user_data.get('current_page', 0)
-    per_page = 15
+    per_page = 10
     total_pages = (len(results) + per_page - 1) // per_page
     if page >= total_pages: page = total_pages - 1; context.user_data['current_page'] = page
     start = page * per_page
@@ -149,10 +196,9 @@ async def show_page(update, context, msg=None):
     keyboard.append([InlineKeyboardButton("⛔️ Отменить", callback_data="cancel")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    text = "🎶 Нашёл!"
     try:
-        if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
-        else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        if msg: await msg.edit_text("🎶 Нашёл!", parse_mode='Markdown', reply_markup=reply_markup)
+        else: await update.callback_query.message.edit_text("🎶 Нашёл!", parse_mode='Markdown', reply_markup=reply_markup)
     except BadRequest as e:
         if "Message is not modified" in str(e): pass
         else: raise e
@@ -181,7 +227,7 @@ async def handle_callback(update, context):
     elif data == "next_page":
         current = context.user_data.get('current_page', 0)
         results = context.user_data.get('search_results', [])
-        per_page = 15
+        per_page = 10
         total_pages = (len(results) + per_page - 1) // per_page
         if current < total_pages - 1: context.user_data['current_page'] = current + 1; await show_page(update, context)
     elif data.startswith("play_"):
@@ -210,7 +256,7 @@ async def handle_callback(update, context):
                         await status_msg.edit_text(f"❌ Ошибка отправки: {e}")
                         await show_page(update, context)
                 else:
-                    await status_msg.edit_text(f"❌ Не скачалось *{title}*.", parse_mode='Markdown')
+                    await status_msg.edit_text(f"❌ Не скачалось *{title}*.\nПопробуй скачать по ссылке!\n{url}", parse_mode='Markdown')
                     await show_page(update, context)
             except asyncio.CancelledError:
                 await status_msg.edit_text("⛔️ Отменено.")
@@ -218,7 +264,7 @@ async def handle_callback(update, context):
                 await status_msg.edit_text("❌ Загрузка заняла слишком много времени.")
                 await show_page(update, context)
             except Exception as e:
-                await status_msg.edit_text(f"❌ Ошибка: {e}")
+                await status_msg.edit_text(f"❌ Ошибка: {e}\nПопробуй скачать по ссылке!\n{url}")
                 await show_page(update, context)
             finally:
                 context.user_data.pop('active_task', None)
@@ -228,7 +274,7 @@ async def handle_callback(update, context):
         await status_msg.edit_text(f"⏳ Качаю *{title}*...", parse_mode='Markdown', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⛔️ Отменить", callback_data="cancel")]]))
 
 def main():
-    print("✅ SoundCloud бот запущен на Render через Webhook!")
+    print("✅ Умный бот запущен на Render!")
     app = Application.builder().token(TOKEN).read_timeout(120).write_timeout(120).connect_timeout(120).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
