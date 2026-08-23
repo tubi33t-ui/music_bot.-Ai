@@ -24,7 +24,7 @@ def clean_title(title):
     title = re.sub(r'\s*[\(\[][^)\]]*(official|audio|video|lyrics|hq|hd|remaster|clip|клип|официальный|аудио|видео|текст)[^)\]]*[\)\]]', '', title, flags=re.IGNORECASE)
     return title.strip(' -–—,|')
 
-# --- БЫСТРЫЙ ПОИСК НА SOUNDCLOUD (ограничен до 20 треков) ---
+# --- БЫСТРЫЙ ПОИСК НА SOUNDCLOUD ---
 def search_soundcloud(query, limit=20):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     search_query = f'scsearch:{limit}:{query}'
@@ -34,7 +34,7 @@ def search_soundcloud(query, limit=20):
             'no_warnings': True,
             'extract_flat': True,
             'headers': headers,
-            'socket_timeout': 5, # Не ждем долго, если сервер тупит
+            'socket_timeout': 5,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(search_query, download=False)
@@ -44,7 +44,8 @@ def search_soundcloud(query, limit=20):
                 for entry in entries:
                     title = entry.get('title', 'Без названия')
                     duration = entry.get('duration', 0)
-                    # Убрали жесткий фильтр длительности для скорости
+                    # ГЛАВНОЕ ИСПРАВЛЕНИЕ: приводим к целому числу
+                    duration = int(duration) if duration else 0
                     url = entry.get('url') or entry.get('webpage_url')
                     results.append({'title': title, 'url': url, 'duration': duration})
                 return results
@@ -91,7 +92,6 @@ async def handle_message(update, context):
         try: await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=old_status_id)
         except: pass
 
-    # УСКОРЕННАЯ ЛОГИКА: 1 слово - 20 треков, 2 слова - 5 треков
     if len(query.split()) == 2: 
         limit = 5
     else: 
@@ -125,7 +125,8 @@ async def show_page(update, context, msg=None):
     for i, track in enumerate(page_results, start=start + 1):
         clean_t = clean_title(track['title'])
         dur = track.get('duration', 0)
-        dur_str = f"{dur//60}:{dur%60:02d}" if dur else "??:??"
+        # Тут тоже используем int()
+        dur_str = f"{int(dur)//60}:{int(dur)%60:02d}" if dur else "??:??"
         label = f"{i}. {clean_t[:35]} - {dur_str}"
         if len(label) > 60: label = label[:57] + '...'
         keyboard.append([InlineKeyboardButton(label, callback_data=f"play_{i-1}")])
