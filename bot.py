@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest
 
-# Берем токен из настроек Railway. Если токена нет - бот не запустится.
+# Берем токен из настроек Railway
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
     print("❌ ОШИБКА: Не задана переменная окружения TOKEN на Railway!")
@@ -127,14 +127,28 @@ def search_youtube(query, limit=40):
     print("❌ ВСЕ СПОСОБЫ ПРОВАЛИЛИСЬ.")
     return []
 
+# 🔥 НОВАЯ ФУНКЦИЯ СКАЧИВАНИЯ (обход блокировок YouTube)
 def download_youtube(url):
     try:
-        ydl_opts = {'format': '140', 'outtmpl': 'downloads/%(title)s.%(ext)s', 'quiet': True, 'no_warnings': True, 'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}, 'geo_bypass': True, 'socket_timeout': 20, 'retries': 3, 'fragment_retries': 3}
+        ydl_opts = {
+            'format': 'bestaudio/best',  # Ищем любой аудиоформат
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'quiet': True, 'no_warnings': True,
+            'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
+            'geo_bypass': True,
+            'socket_timeout': 20,
+            'retries': 5,  # Больше попыток, если сеть плохая
+            'fragment_retries': 5,
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}}  # Обход блокировки дата-центров
+        }
         os.makedirs('downloads', exist_ok=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        m4a_files = glob.glob('downloads/*.m4a')
-        if m4a_files: return max(m4a_files, key=os.path.getmtime)
+            
+        # Ищем все возможные аудиофайлы
+        audio_files = glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
+        if audio_files:
+            return max(audio_files, key=os.path.getmtime)
         return None
     except Exception as e:
         logging.error(f"Ошибка скачивания: {e}")
@@ -202,13 +216,13 @@ async def show_page(update, context, msg=None):
     reply_markup = InlineKeyboardMarkup(keyboard)
     text = "🎶 Нашёл!"
 
-    # ВОТ ТУТ ДОБАВЛЕНА ЗАЩИТА ОТ ОШИБКИ "Message is not modified":
+    # Защита от ошибки "Message is not modified":
     try:
         if msg: await msg.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
         else: await update.callback_query.message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     except BadRequest as e:
         if "Message is not modified" in str(e):
-            pass # Просто игнорируем, если нажали на то же самое
+            pass
         else:
             raise e
 
