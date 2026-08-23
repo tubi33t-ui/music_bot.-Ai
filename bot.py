@@ -104,16 +104,26 @@ def download_youtube(url):
     for client in clients_list:
         try:
             ydl_opts = {
-                'format': 'bestaudio/best', 'outtmpl': 'downloads/%(title)s.%(ext)s', 'quiet': True, 'no_warnings': True,
+                'format': 'bestaudio/best',
+                'outtmpl': 'downloads/%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
                 'headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
-                'geo_bypass': True, 'socket_timeout': 30, 'retries': 3, 'fragment_retries': 3,
+                'geo_bypass': True,
+                'socket_timeout': 30,
+                'retries': 3,
+                'fragment_retries': 3,
+                # ВОТ ГЛАВНОЕ ИЗМЕНЕНИЕ - ПОДГРУЖАЕМ КУКИ ОТ YOUTUBE:
+                'cookiefile': 'cookies.txt',
                 'extractor_args': {'youtube': {'player_client': [client]}}
             }
             os.makedirs('downloads', exist_ok=True)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
+            
             audio_files = glob.glob('downloads/*.m4a') + glob.glob('downloads/*.opus') + glob.glob('downloads/*.webm')
-            if audio_files: return max(audio_files, key=os.path.getmtime)
+            if audio_files:
+                return max(audio_files, key=os.path.getmtime)
         except Exception as e:
             logging.error(f"Ошибка скачивания (клиент {client}): {e}")
             continue
@@ -251,13 +261,12 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     
     webhook_url = os.getenv("RENDER_EXTERNAL_URL", "https://music-bot-ai.onrender.com") + "/webhook"
-    
-    # Убрали secret_token - он вызывал ошибку
     app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
         url_path="webhook",
-        webhook_url=webhook_url
+        webhook_url=webhook_url,
+        secret_token=TOKEN
     )
 
 if __name__ == "__main__":
